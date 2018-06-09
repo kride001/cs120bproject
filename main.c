@@ -150,7 +150,8 @@ void M_Tick(){
 				//dot_column = col8_r;
 				column_sel = 0x7FFF;
 				M_state = M_UserTurn;
-				userREADY = 1;			
+				userREADY = 1;	
+				i = -1;		
 				}
 		break;
 		case M_UserTurn:
@@ -179,6 +180,7 @@ void M_Tick(){
 			else if ((i >= 8 || column_sel == 0xFEFF) && M_elapsedtime < post_time){
 				i = 0;
 				column_sel = col1_r;
+				column_val = game_pic[curr_pic][i];
 			}
 			else{};
 			M_elapsedtime++;
@@ -203,6 +205,10 @@ void M_Tick(){
 			else if ((i >= 8 || column_sel == col8_r) && M_elapsedtime < solve_time[0]){
 				column_sel = col1_r;
 				i = 0;
+				if(column_sel == dot_column){
+					column_val = user_pic[i] | dot_row;
+				}
+				else {column_val = user_pic[i];}
 			}
 			M_elapsedtime++;
 			
