@@ -2,8 +2,12 @@
 #include "timer.h"
 
 unsigned char gametime = 0x00;
+unsigned char SCORE = 0x00;
+int correct = 0;
 int gameOn = 0;
 int userREADY = 0;
+int checkScoreREADY = 0;
+int checkDone = 0;
 const unsigned short post_time = 1250; // 1250
 unsigned short solve_time [4] = {6250, 5000, 3000, 2000};
 
@@ -33,6 +37,7 @@ void transmit_data(unsigned short data){
 	// clears all lines in preparation of a new transmission
 	PORTC = 0x00;
 }
+
 void adc_init(){
 	// AREF = AVcc
 	ADMUX = (1<<REFS0);
@@ -51,19 +56,70 @@ unsigned short readadc(uint8_t ch)
 	return(ADC);        //RETURN ADC VALUE
 }
 
-enum Matrix {M_Start, M_Array1, M_UserTurn, M_Stop }M_state;
-unsigned char m_wait = 0x00;
-
 unsigned char game_pic[4][8] = {{0x00, 0x00, 0x00, 0x18, 0x18, 0x00, 0x00, 0x00},
-						{0x00, 0x10, 0x18, 0x08, 0x0C, 0x00, 0x00, 0x00},
-						{0x00, 0x2A, 0x54, 0x2A, 0x54, 0x2A, 0x54, 0x00},
-						{0x00, 0x10, 0x24,0x20, 0x20, 0x24, 0x10, 0x00}};
+{0x00, 0x10, 0x18, 0x08, 0x0C, 0x00, 0x00, 0x00},
+{0x00, 0x2A, 0x54, 0x2A, 0x54, 0x2A, 0x54, 0x00},
+{0x00, 0x10, 0x24,0x20, 0x20, 0x24, 0x10, 0x00}};
 unsigned char user_pic[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-							
+
 //unsigned char PORT1 [8] = {col1_r, col2_r, col3_r, col4_r, col5_r, col6_r, col7_r, col8_r};
-	
+
 int i = 0;
 int curr_pic = 0;
+int flag = 1;
+
+unsigned char tempB = 0x00;
+enum Check_Score {CS_Start, CS_Comp, CS_Reset} CS_state;
+void Check_Score_SM(){
+	switch(CS_state){
+		case CS_Start:
+			if(checkScoreREADY){
+				CS_state = CS_Comp;
+			}
+		break;
+		case CS_Comp:
+			CS_state = CS_Reset;
+			
+		break;
+		case CS_Reset:
+			CS_state = CS_Start;
+		break;
+	}
+	
+	switch(CS_state){
+		case CS_Start:
+		break;
+		case CS_Comp:
+			for(int j = 0; j < 8; j++){
+				if(user_pic[j] == game_pic[curr_pic][j] && flag){
+					flag = 1;
+				}
+				else{flag = 0;}
+			}
+			if(flag){
+				SCORE = SCORE + 5;
+				tempB = 0x04;
+				correct = 1;
+			}
+			else{
+				tempB = 0x08;
+				flag = 1; //reset
+				correct = 0;
+			}
+		break;
+		case CS_Reset:
+			checkScoreREADY = 0;
+			checkDone = 1;
+			tempB = 0x00;
+		break;
+	}
+	PORTB = (tempB & 0x0C) | PORTB;
+};
+
+enum Matrix {M_Start, M_Array1, M_UserTurn, M_Stop, M_Next}M_state;
+unsigned char m_wait = 0x00;
+
+
 unsigned char column_val = 0x00; // sets the pattern displayed on columns (rows)
 unsigned short column_sel = 0x7FFF; // grounds column to display pattern  (column)
 unsigned short M_elapsedtime = 0x00;
@@ -89,9 +145,10 @@ void joystick(){
 			}
 		break;
 		case J_User:
-			//if(!(udV < 700 && udV > 500 && lrV < 700 && lrV > 500 )){
-			//	J_state = J_Wait;
-			//}
+			if(checkScoreREADY){
+				J_state = J_Start;
+				userREADY = 0;
+			}
 		break;
 		case J_Wait:
 			if(udV < 700 && udV > 500 && lrV < 700 && lrV > 500 ){
@@ -125,15 +182,15 @@ void joystick(){
 			//column_sel = dot_column;
 			//column_val = dot_row;
 		break;
-		case J_Wait:
-			
-		break;
 		
+		case J_Wait:
+		break;
 	}
 	
 }
 
 unsigned char butt_sel = 0x00;
+unsigned short chill = 0x0000;
 int butsel_wait = 0;
 void M_Tick(){
 	
@@ -150,17 +207,38 @@ void M_Tick(){
 				//dot_column = col8_r;
 				column_sel = 0x7FFF;
 				M_state = M_UserTurn;
-				userREADY = 1;	
+				userREADY = 1;
 				i = -1;		
 				}
 		break;
 		case M_UserTurn:
-			if(M_elapsedtime >= solve_time[0]){
+			if(M_elapsedtime >= solve_time[curr_pic]){
 				M_state = M_Stop;
 				i = 0;
+				checkScoreREADY = 1;
 			}
 		break;
 		case M_Stop:
+			if(checkDone && chill >= post_time ){
+				M_state = M_Next;
+				checkDone = 0;
+			}
+			chill++;
+		break;
+		case M_Next:
+			if(correct){
+				M_state = M_Start;
+				if(curr_pic < 5){
+					curr_pic++;
+				}
+				//ADD WHEN GAME IS WON
+			}
+			else{
+				M_state = M_Start;
+				gameOn = 0;
+				curr_pic = 0;
+			}
+			
 		break;
 		
 	}
@@ -170,6 +248,7 @@ void M_Tick(){
 				column_val = game_pic[curr_pic][i];
 				column_sel = 0x7FFF;
 			}
+			M_elapsedtime = 0;
 		break;
 		case M_Array1:
 			if(i < 8 && column_sel != 0xFEFF && M_elapsedtime < post_time){
@@ -186,7 +265,7 @@ void M_Tick(){
 			M_elapsedtime++;
 		break;
 		case M_UserTurn:
-			butt_sel = ~PINB & 0x02;
+			butt_sel = ~PINA & 0x02;
 			if(butt_sel){
 				if(!butsel_wait && column_sel == dot_column){
 					user_pic[i] =  user_pic[i]| dot_row;
@@ -194,7 +273,7 @@ void M_Tick(){
 				}
 			}
 			else{butsel_wait = 0;}
-			if(i < 8 && column_sel != 0xFEFF && M_elapsedtime < solve_time[0]){
+			if(i < 8 && column_sel != 0xFEFF && M_elapsedtime < solve_time[curr_pic]){
 				i++;
 				column_sel = (column_sel >> 1) | 0x8000;
 				if(column_sel == dot_column){
@@ -202,7 +281,7 @@ void M_Tick(){
 				}
 				else {column_val = user_pic[i];}
 			}
-			else if ((i >= 8 || column_sel == col8_r) && M_elapsedtime < solve_time[0]){
+			else if ((i >= 8 || column_sel == col8_r) && M_elapsedtime < solve_time[curr_pic]){
 				column_sel = col1_r;
 				i = 0;
 				if(column_sel == dot_column){
@@ -216,6 +295,15 @@ void M_Tick(){
 		case M_Stop:
 			column_val = 0x00;
 			column_sel = 0x00;
+		break;
+		case M_Next:
+			for (int z = 0; z < 8; z++)
+			{
+				user_pic[z] = 0x00;
+			}
+			dot_column = 0xFEFF;
+			dot_row = 0x80;
+			chill = 0;
 		break;
 		
 	}
@@ -231,17 +319,22 @@ void GP_Tick(){
 			GP_state = GP_Init;
 		break;
 		case GP_Init:
-			button_on  = ~PINB & 0x01;
-			if(button_on){
+			button_on  = ~PINA & 0x01;
+			if(button_on && !gameOn){
 				GP_state = GP_On;
+			}
+			else if(button_on && gameOn){
+				
 			}
 		break;
 		case GP_On:
-			if(gameOn){
+			if(gameOn && !button_on){
 				GP_state = GP_Wait;
 			}
 		break;
 		case GP_Wait:
+			GP_state = GP_Start;
+			
 		break;
 	}
 	switch(GP_state){
@@ -267,30 +360,26 @@ int main(void)
     PORTC = 0x00;
     DDRD = 0xFF;
     PORTD = 0x00;
-    DDRB = 0x00;
-    PORTB = 0xFF;
+    DDRB = 0xFF;
+    PORTB = 0x00;
 	
 	TimerSet(4);//4
 	TimerOn();
 	adc_init();
 	GP_state = GP_Start;
 	M_state = M_Start;
-	unsigned short joystick_elapsedtime = 0x00;
 	
 	
     while (1) 
     {
 		GP_Tick();
 		M_Tick();
-		//if(joystick_elapsedtime == 200){
 		joystick();
-			//joystick_elapsedtime = 0;
-		//}
+		Check_Score_SM();
 		
-
 		
 		while(!TimerFlag);
 		TimerFlag = 0;
-		joystick_elapsedtime++;
+		
     }
 }
